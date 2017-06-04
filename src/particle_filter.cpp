@@ -78,8 +78,9 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 		else{
 			particles[i].x += velocity / yaw_rate * (sin(particles[i].theta + yaw_rate * delta_t) - sin(particles[i].theta)) + dist_x(gen);
 			particles[i].y += velocity / yaw_rate * (cos(particles[i].theta) - cos(particles[i].theta + yaw_rate * delta_t)) + dist_y(gen);
+		particles[i].theta +=  yaw_rate * delta_t + dist_theta(gen);
+
 		}
-		particles[i].theta += particles[i].theta + yaw_rate * delta_t + dist_theta(gen);
 	}
 
 }
@@ -91,17 +92,19 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
 	//   implement this method and use it as a helper during the updateWeights phase.
 
 	for (int i = 0; i < observations.size(); ++i) {
-		double min_dist = INT_MAX;
-		int min_id = -1;
+
+		double min_dist = INT_MAX;		
+
 		for (int j = 0; j < predicted.size(); ++j) {
+
 			double curr_dist = dist(observations[i].x, observations[i].y, predicted[j].x, predicted[j].y);
+
 			if (curr_dist < min_dist) {
 				min_dist = curr_dist;
-				min_id = j;
+           			observations[i].id = j;				
 			}
 		}
 
-		observations[i].id = min_id;
 	}
 }
 
@@ -119,33 +122,43 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   http://planning.cs.uiuc.edu/node99.html
 
 	vector<LandmarkObs> land_marks;
-        LandmarkObs lm;
 
 	for (int i = 0; i < particles.size(); ++i) {
-                land_marks.clear();
+		
+		// Transform car's observations to map coordinate system
+		std::vector<LandmarkObs> transformed_obs;
+
+		for (int j = 0; j < observations.size(); ++j) {
+			LandmarkObs tmp;
+			tmp.x = observations[j].x * cos(particles[i].theta) - observations[j].y * sin(particles[i].theta) + particles[i].x;
+			tmp.y = observations[j].x * sin(particles[i].theta) + observations[j].y * cos(particles[i].theta) + particles[i].y;
+			transformed_obs.push_back(tmp);
+		}
+
+
+        	// Landmarks in range
+	        land_marks.clear();
+        
 		for (int j = 0; j < map_landmarks.landmark_list.size(); ++j) {
+		        LandmarkObs lm;
 			double landmark_dist = dist(particles[i].x, particles[i].y, map_landmarks.landmark_list[j].x_f, map_landmarks.landmark_list[j].y_f);
 			if (landmark_dist <=  sensor_range){
-				lm.id = map_landmarks.landmark_list[i].id_i;
-				lm.x = map_landmarks.landmark_list[i].x_f;
-				lm.y = map_landmarks.landmark_list[i].y_f;
- 				land_marks.push(lm);
+				lm.id = map_landmarks.landmark_list[j].id_i;
+				lm.x = map_landmarks.landmark_list[j].x_f;
+				lm.y = map_landmarks.landmark_list[j].y_f;
+ 				land_marks.push_back(lm);
 			}
 		}
 
 
-		std::vector<LandmarkObs> transformed_obs = observations;
-		double  weight = 1.;
-		for (int j = 0; j < observations.size(); ++j) {
-			// Transform car's observations to map coordinate system
-			transformed_obs[j].x = observations[j].x * cos(particles[i].theta) - observations[j].y * sin(particles[i].theta) + particles[i].x;
-			transformed_obs[j].y = observations[j].x * sin(particles[i].theta) + observations[j].y * cos(particles[i].theta) + particles[i].y;
-		}
-		
+		// Data association                
 		dataAssociation(land_marks, transformed_obs);
-		
+
+
+
+		double weight = 1.0;
 		for (int j = 0; j < transformed_obs.size(); ++j) {
-			int id = land_marks[j].id;
+			int id = transformed_obs[j].id;
 			double xmu = transformed_obs[j].x - land_marks[id].x;
 			double ymu = transformed_obs[j].y - land_marks[id].y;
 			double sigmax = std_landmark[0];
@@ -154,8 +167,8 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 			weight *= w;							
 		}
 
-		particles[i].weight = weight + 0.0001;
-		weights[i] = weight + 0.0001;
+		particles[i].weight = weight;
+		weights[i] = weight;
 	    
 	}
 
@@ -170,7 +183,7 @@ void ParticleFilter::resample() {
 	vector<Particle> new_particles = vector<Particle>(particles.size());
 	random_device rd;
 	mt19937 gen(rd());
-	discrete_distribution<> d (weights.begin(), weights.end());
+	discrete_distribution<int> d (weights.begin(), weights.end());
 	for (int n = 0; n < particles.size(); ++n) {
 		 int idx = d(gen);
 		 new_particles[n] = particles[idx];
